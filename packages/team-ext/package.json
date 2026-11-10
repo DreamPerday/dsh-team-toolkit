@@ -1,0 +1,41 @@
+{
+    "name":  "dsh-team-ext",
+    "version":  "0.1.0",
+    "private":  true,
+    "description":  "P0 observation plugin for DSH Agent Teams: per-request cache usage and prompt-prefix rewrite audit. Registers no tool and no prompt section.",
+    "type":  "module",
+    "main":  "index.js",
+    "exports":  {
+                    ".":  {
+                              "default":  "./index.js"
+                          },
+                    "./cordis.patch.yml":  "./cordis.patch.yml",
+                    "./package.json":  "./package.json"
+                },
+    "files":  [
+                  "index.js",
+                  "core.mjs",
+                  "cordis.patch.yml",
+                  "README.md",
+                  "analyze_cache_log.py"
+              ],
+    "keywords":  [
+                     "dsh",
+                     "dsh-plugin",
+                     "dsh-bundle",
+                     "cordis",
+                     "agent-team",
+                     "cache"
+                 ],
+    "license":  "MIT",
+    "dsh":  {
+                "bundle":  {
+                               "patch":  "./cordis.patch.yml"
+                           }
+            },
+    "repository":  {
+                       "type":  "git",
+                       "url":  "git+https://github.com/DreamPerday/dsh-team-toolkit.git",
+                       "directory":  "packages/team-ext"
+                   }
+}

@@ -1,0 +1,40 @@
+{
+    "name":  "dsh-team-compact",
+    "version":  "0.1.0",
+    "private":  true,
+    "description":  "Manual context compaction for DSH Agent Teams: a scoped compact_context tool plus the /compact-agent human command.",
+    "type":  "module",
+    "main":  "index.js",
+    "exports":  {
+                    ".":  {
+                              "default":  "./index.js"
+                          },
+                    "./cordis.patch.yml":  "./cordis.patch.yml",
+                    "./package.json":  "./package.json"
+                },
+    "files":  [
+                  "index.js",
+                  "cordis.patch.yml",
+                  "README.md",
+                  "verify.mjs"
+              ],
+    "keywords":  [
+                     "dsh",
+                     "dsh-plugin",
+                     "dsh-bundle",
+                     "cordis",
+                     "agent-team",
+                     "compaction"
+                 ],
+    "license":  "MIT",
+    "dsh":  {
+                "bundle":  {
+                               "patch":  "./cordis.patch.yml"
+                           }
+            },
+    "repository":  {
+                       "type":  "git",
+                       "url":  "git+https://github.com/DreamPerday/dsh-team-toolkit.git",
+                       "directory":  "packages/team-compact"
+                   }
+}

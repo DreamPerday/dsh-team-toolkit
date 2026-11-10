@@ -1,0 +1,16 @@
+# One composition layer for the P0 team cache/prefix audit plugin.
+#
+# The row is the Host half's Loader entry. The plugin adds no tool and no prompt
+# section, so it cannot change the model-visible request. `logDir` is the only
+# project-specific value: records land next to the other local run records.
+- insert:
+    - id: team-ext
+      name: 'dsh-team-ext'
+      config:
+        # Empty logDir means ~/.dsh/team-ext (Windows: %USERPROFILE%\.dsh\team-ext).
+        logDir: ''
+        enabled: true
+        recordToolResults: true
+        warnHitRateBelow: 0.5
+        warnConsecutive: 3
+        flushMs: 2000

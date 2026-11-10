@@ -1,0 +1,7 @@
+# One composition layer for the manual team-compaction plugin.
+#
+# The row is the Host half's Loader entry. The plugin adds no prompt section;
+# its tool is registered per Team member scope and its human command globally.
+- insert:
+    - id: team-compact
+      name: 'dsh-team-compact'
