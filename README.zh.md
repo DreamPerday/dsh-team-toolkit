@@ -41,6 +41,13 @@ effort 的辅助 LLM 调用在 OpenAI 兼容的推理模型上退化成了 `reas
 审计插件用来让这类故障可见（逐请求缓存字段 + 前缀重写事件）；压缩插件则是因为官方压缩接口
 只能压缩"整段可压缩历史"，当某个 agent 的上下文已经很大时，需要一个可指定目标的手动入口。
 
+## 补丁（不是插件）
+
+[`patches/team-model-selection`](patches/team-model-selection/README.md) —— 针对 DSH Desktop
+0.2.1-rc.2 的就地补丁，给 `spawn_teammate` 增加可选的 `provider` / `model` / `reasoning_effort`，
+让 Lead 可以把每个队友钉到不同的 LLM 路由。因为要改已安装包里的工具 schema 和团队服务的
+spawn/持久化路径（两者都没有扩展点），所以它版本绑定、锚点不匹配就失败，DSH 升级后需要重打。
+
 ## 兼容性
 
 基于 DSH `0.2.1-rc.2` 的 Host 服务编写（`agents`、`commands`、`agentTeams`、`tokenMeter`、

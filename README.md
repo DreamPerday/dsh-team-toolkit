@@ -47,6 +47,14 @@ that class of failure visible (per-request cache fields plus prefix-rewrite even
 compact plugin exists because the official compaction seam only compacts the whole compactable
 range, so a manual, targetable entry point is useful when an agent's context has grown large.
 
+## Patches (not plugins)
+
+[`patches/team-model-selection`](patches/team-model-selection/README.md) — an in-place patch for DSH
+Desktop 0.2.1-rc.2 that adds optional `provider` / `model` / `reasoning_effort` to `spawn_teammate`,
+so the Lead can pin each teammate to a different LLM route. It has to edit the installed bundles
+(the tool schema and the team service expose no extension point), so it is version-pinned, fails
+loudly on anchor mismatch, and must be re-applied after a DSH update.
+
 ## Compatibility
 
 Written against DSH `0.2.1-rc.2` host services (`agents`, `commands`, `agentTeams`,
