@@ -45,8 +45,13 @@ effort 的辅助 LLM 调用在 OpenAI 兼容的推理模型上退化成了 `reas
 
 [`patches/team-model-selection`](patches/team-model-selection/README.md) —— 针对 DSH Desktop
 0.2.1-rc.2 的就地补丁，给 `spawn_teammate` 增加可选的 `provider` / `model` / `reasoning_effort`，
-让 Lead 可以把每个队友钉到不同的 LLM 路由。因为要改已安装包里的工具 schema 和团队服务的
-spawn/持久化路径（两者都没有扩展点），所以它版本绑定、锚点不匹配就失败，DSH 升级后需要重打。
+让 Lead 可以把每个队友钉到不同的 LLM 路由。
+
+[`patches/team-member-remove`](patches/team-member-remove/README.md) —— 增加终态成员阶段
+`removed` 和 Lead 专用的 `remove_teammate` 工具：中断并释放该队友、从 `list_agents` 隐藏、释放
+名字和成员名额，会话文件保留在磁盘。名册是日志投影且为包内私有，所以同样只能就地补丁。
+
+两个补丁都版本绑定、锚点不匹配即失败，DSH 升级后需要重打。
 
 ## 兼容性
 

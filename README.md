@@ -51,9 +51,15 @@ range, so a manual, targetable entry point is useful when an agent's context has
 
 [`patches/team-model-selection`](patches/team-model-selection/README.md) — an in-place patch for DSH
 Desktop 0.2.1-rc.2 that adds optional `provider` / `model` / `reasoning_effort` to `spawn_teammate`,
-so the Lead can pin each teammate to a different LLM route. It has to edit the installed bundles
-(the tool schema and the team service expose no extension point), so it is version-pinned, fails
-loudly on anchor mismatch, and must be re-applied after a DSH update.
+so the Lead can pin each teammate to a different LLM route.
+
+[`patches/team-member-remove`](patches/team-member-remove/README.md) — adds a terminal `removed`
+member phase and a Lead-only `remove_teammate` tool: the teammate is interrupted, released and
+hidden from `list_agents`, its name and member slot are freed, and its saved conversation stays on
+disk. The roster is journal-projected and private, so this also has to be an in-place patch.
+
+Both patches are version-pinned, fail loudly on anchor mismatch, and must be re-applied after a DSH
+update.
 
 ## Compatibility
 
