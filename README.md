@@ -54,11 +54,16 @@ Desktop 0.2.1-rc.2 that adds optional `provider` / `model` / `reasoning_effort` 
 so the Lead can pin each teammate to a different LLM route.
 
 [`patches/team-member-remove`](patches/team-member-remove/README.md) — adds a terminal `removed`
-member phase and a Lead-only `remove_teammate` tool: the teammate is interrupted, released and
-hidden from `list_agents`, its name and member slot are freed, and its saved conversation stays on
-disk. The roster is journal-projected and private, so this also has to be an in-place patch.
+member phase, a Lead-only `remove_teammate` tool and the `/team-remove` command: the teammate is
+interrupted, released, hidden from `list_agents` and the Web panel, its name and member slot are
+freed, and its saved conversation is deleted. The roster is journal-projected and private, so this
+also has to be an in-place patch.
 
-Both patches are version-pinned, fail loudly on anchor mismatch, and must be re-applied after a DSH
+[`patches/team-panel-remove`](patches/team-panel-remove/README.md) — a client-bundle patch that adds
+a × control to each non-Lead row of the Web member panel; it runs `/team-remove` through the client
+Remote command channel.
+
+The patches are version-pinned, fail loudly on anchor mismatch, and must be re-applied after a DSH
 update.
 
 ## Compatibility
