@@ -80,3 +80,8 @@ Then restart DSH Desktop.
 - A teammate cannot remove itself or another member, and the Lead cannot be removed.
 - Removing a member that is still `provisioning` is allowed; the spawn path then fails with
   `TEAM_PROVISIONING_CONFLICT` instead of reporting a created member.
+## v2 (2026-11-18)
+
+- Removed members are filtered out of the `agentTeam` projection, so the Web member panel drops them live.
+- The teammate's saved session directory is deleted from disk; the tool result reports `sessionDeleted` (root overridable with `DSH_SESSIONS_DIR`).
+- Added the host command `/team-remove <member>` (registered by the dsh-team-compact plugin) and a panel × control (see `patches/team-panel-remove`).

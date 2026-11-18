@@ -264,4 +264,31 @@ export function apply(ctx) {
       }
     },
   });
+
+  const REMOVE_USAGE = "Usage: /team-remove <member-name>";
+  ctx.commands.register({
+    definitionId: "dsh-team-compact/team-remove",
+    name: "team-remove",
+    description: "Remove a Team member from the roster and delete its saved session",
+    async handler(invocation) {
+      const parts = String(invocation.rawInput ?? "").trim().split(/\s+/).filter((part) => part.length > 0);
+      if (parts.length !== 1) return { kind: "error", text: REMOVE_USAGE };
+      const teams = teamsOf();
+      if (teams === undefined || typeof teams.removeTeammate !== "function") {
+        return {
+          kind: "error",
+          text: "team member removal requires the team-member-remove patch; restart DSH Desktop after applying it",
+        };
+      }
+      try {
+        const value = await teams.removeTeammate(invocation.agent, parts[0]);
+        return {
+          kind: "success",
+          text: `removed ${parts[0]} (previous status ${value.previousStatus}${value.sessionDeleted === true ? ", session deleted" : ", session kept"})`,
+        };
+      } catch (error) {
+        return { kind: "error", text: String(error?.message ?? error) };
+      }
+    },
+  });
 }

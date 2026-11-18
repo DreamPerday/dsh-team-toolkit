@@ -1,15 +1,17 @@
 /**
- * In-place patch: remove a teammate from the Team roster.
+ * In-place patch: remove a teammate from the Team roster and purge its session.
  *
- * Adds a terminal `removed` member phase, roster filtering, and a Lead-only
- * `removeTeammate` service method plus the `remove_teammate` model tool.
+ * v2 adds: the removed member disappears from the agentTeam projection (so the
+ * Web member panel drops it), and the teammate's saved session directory is
+ * deleted from disk (best effort, `sessionDeleted` in the result).
  *
  * Usage:
  *   DSH_APP_DIR=<...> node apply_patch.mjs --check
  *   DSH_APP_DIR=<...> node apply_patch.mjs
  *
- * Idempotent: re-running after a successful apply makes no changes.
- * Fails loudly before writing when an anchor is missing or ambiguous.
+ * Idempotent and upgradeable: it applies every missing v1/v2 step and never
+ * rewrites a step that is already present. Fails loudly before writing on an
+ * ambiguous anchor.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -31,8 +33,6 @@ const TOOL = path.join(APP, "node_modules/@deepseek-ai/dsh-experimental-tool-age
 const PATCHDIR = process.env.DSH_PATCH_BACKUP_DIR ?? path.join(HERE, ".backups");
 const MANIFEST = path.join(PATCHDIR, "manifest.json");
 const CHECK_ONLY = process.argv.includes("--check");
-const TEAM_MARK = "async removeTeammate(caller, targetName)";
-const TOOL_MARK = 'name: "remove_teammate"';
 
 function fail(message) {
 	throw new Error(`team-member-remove: ${message}`);
@@ -57,7 +57,6 @@ function replaceAll(text, find, replacement, label, expected) {
 
 const L = (...lines) => lines.join("\n");
 
-// --- service anchors -------------------------------------------------------
 const ENUM_OLD = L(
 	"\tphase: z$1.enum([",
 	"\t\t\"provisioning\",",
@@ -95,6 +94,7 @@ const TRANSITION_NEW = L(
 	"\t\t\t\tif (!allowed.includes(member.phase)) throw new Error(`teammate \"${member.name}\" has an invalid ${prior.phase} -> ${member.phase} transition`);",
 	"\t\t\t}"
 );
+
 const LIST_OLD = L(
 	"\t\tfor (const member of state.members) {",
 	"\t\t\tconst live = this.ctx.agents.get(member.id);",
@@ -128,6 +128,63 @@ const SETTLE_NEW = L(
 	"\t\tif (settledPhase === \"failed\") {"
 );
 
+const PROJECTION_OLD = L(
+	"\tfor (const member of state.members) members.push({",
+	"\t\tid: member.id,",
+	"\t\tname: member.name,",
+	"\t\trole: \"teammate\",",
+	"\t\tphase: member.phase,",
+	"\t\t...member.error === void 0 ? {} : { error: member.error }",
+	"\t});"
+);
+const PROJECTION_NEW = L(
+	"\tfor (const member of state.members) {",
+	"\t\tif (member.phase === \"removed\") continue;",
+	"\t\tmembers.push({",
+	"\t\t\tid: member.id,",
+	"\t\t\tname: member.name,",
+	"\t\t\trole: \"teammate\",",
+	"\t\t\tphase: member.phase,",
+	"\t\t\t...member.error === void 0 ? {} : { error: member.error }",
+	"\t\t});",
+	"\t}"
+);
+
+const PURGE_HELPER = L(
+	"/** Delete the removed teammate's saved session directory, best effort. */",
+	"async function purgeMemberSession(id) {",
+	"	const fs = await import(\"node:fs/promises\");",
+	"	const os = await import(\"node:os\");",
+	"	const p = await import(\"node:path\");",
+	"	const root = process.env.DSH_SESSIONS_DIR ?? p.join(os.homedir(), \".dsh\", \"sessions\");",
+	"	const target = `session-${id}`;",
+	"	let entries;",
+	"	try {",
+	"		entries = await fs.readdir(root, { withFileTypes: true });",
+	"	} catch {",
+	"		return false;",
+	"	}",
+	"	for (const entry of entries) {",
+	"		if (!entry.isDirectory()) continue;",
+	"		const candidate = p.join(root, entry.name, target);",
+	"		try {",
+	"			const stat = await fs.stat(candidate);",
+	"			if (!stat.isDirectory()) continue;",
+	"		} catch {",
+	"			continue;",
+	"		}",
+	"		try {",
+	"			await fs.rm(candidate, { recursive: true, force: true });",
+	"			return true;",
+	"		} catch {",
+	"			return false;",
+	"		}",
+	"	}",
+	"	return false;",
+	"}"
+);
+const PURGE_ANCHOR = "/** Turn availability is independent of whether the Agent is loaded. */";
+
 const ROSTER_INTERRUPT_OLD = L(
 	"\t* @returns the target status sampled before cancellation.",
 	"\t*/",
@@ -147,12 +204,27 @@ const ROSTER_INTERRUPT_OLD = L(
 	"\t\treturn { previousStatus };",
 	"\t}"
 );
+const ROSTER_TAIL_V1 = L(
+	"\t\ttry {",
+	"\t\t\tawait this.stopTeammates(root, [target.id]);",
+	"\t\t} catch {}",
+	"\t\treturn { previousStatus };",
+	"\t}"
+);
+const ROSTER_TAIL_V2 = L(
+	"\t\ttry {",
+	"\t\t\tawait this.stopTeammates(root, [target.id]);",
+	"\t\t} catch {}",
+	"\t\tconst sessionDeleted = await purgeMemberSession(target.id);",
+	"\t\treturn { previousStatus, sessionDeleted };",
+	"\t}"
+);
 const ROSTER_REMOVE_METHOD = L(
 	"\t/**",
-	"\t* Remove one teammate from the Team roster.",
+	"\t* Remove one teammate from the Team roster and delete its saved session.",
 	"\t* @param caller - exact live Lead Agent.",
 	"\t* @param targetName - durable teammate name.",
-	"\t* @returns the target status sampled before removal.",
+	"\t* @returns the target status sampled before removal and whether its session was deleted.",
 	"\t*/",
 	"\tasync removeTeammate(caller, targetName) {",
 	"\t\tconst membership = this.membership(caller);",
@@ -161,7 +233,7 @@ const ROSTER_REMOVE_METHOD = L(
 	"\t\tconst root = membership.root;",
 	"\t\tconst target = this.journal.state(root).members.find((candidate) => candidate.name === name);",
 	"\t\tif (target === void 0) throw new TeamError(`teammate \"${name}\" was not found in this Team`, \"TEAM_MEMBER_NOT_FOUND\");",
-	"\t\tif (target.phase === \"removed\") return { previousStatus: \"inactive\" };",
+	"\t\tif (target.phase === \"removed\") return { previousStatus: \"inactive\", sessionDeleted: false };",
 	"\t\tconst live = this.ctx.agents.get(target.id);",
 	"\t\tconst previousStatus = target.phase === \"provisioning\" ? \"provisioning\" : target.phase === \"failed\" ? \"failed\" : live === void 0 ? \"inactive\" : availability(live);",
 	"\t\tif (live !== void 0) this.ctx.subagents.interrupt(target.id, {",
@@ -180,7 +252,8 @@ const ROSTER_REMOVE_METHOD = L(
 	"\t\ttry {",
 	"\t\t\tawait this.stopTeammates(root, [target.id]);",
 	"\t\t} catch {}",
-	"\t\treturn { previousStatus };",
+	"\t\tconst sessionDeleted = await purgeMemberSession(target.id);",
+	"\t\treturn { previousStatus, sessionDeleted };",
 	"\t}"
 );
 
@@ -191,10 +264,10 @@ const SERVICE_INTERRUPT_OLD = L(
 );
 const SERVICE_REMOVE_METHOD = L(
 	"\t/**",
-	"\t* Remove one teammate from the Team roster.",
+	"\t* Remove one teammate from the Team roster and delete its saved session.",
 	"\t* @param caller - exact live Lead Agent.",
 	"\t* @param targetName - durable teammate name.",
-	"\t* @returns the target status sampled before removal.",
+	"\t* @returns the target status sampled before removal and whether its session was deleted.",
 	"\t*/",
 	"\tasync removeTeammate(caller, targetName) {",
 	"\t\tif (this.lifecycle.disposed) throw new TeamError(\"Agent Teams service is disposing\", \"TEAM_DISPOSED\");",
@@ -205,7 +278,6 @@ const SERVICE_REMOVE_METHOD = L(
 	"\t}"
 );
 
-// --- tool anchors ----------------------------------------------------------
 const POLICY_OLD =
 	'Use the target returned by spawn_teammate or list_agents for send_message${interrupt ? " and interrupt_agent" : ""}, or as owner when assigning or filtering shared tasks.';
 const POLICY_NEW =
@@ -222,7 +294,33 @@ const INTERRUPT_SCHEMA_OLD = L(
 	"\t} }",
 	"};"
 );
-const REMOVE_SCHEMA = L(
+const REMOVE_SCHEMA_V2 = L(
+	"const REMOVE_VALUE_SCHEMA = {",
+	"\ttype: \"object\",",
+	"\tadditionalProperties: false,",
+	"\tproperties: {",
+	"\t\tremoved: {",
+	"\t\t\ttype: \"boolean\",",
+	"\t\t\trequired: true,",
+	"\t\t\tconst: true",
+	"\t\t},",
+	"\t\ttarget: {",
+	"\t\t\ttype: \"string\",",
+	"\t\t\trequired: true",
+	"\t\t},",
+	"\t\tpreviousStatus: {",
+	"\t\t\ttype: \"string\",",
+	"\t\t\trequired: true,",
+	"\t\t\tenum: [\"running\", \"inactive\", \"provisioning\", \"failed\"]",
+	"\t\t},",
+	"\t\tsessionDeleted: {",
+	"\t\t\ttype: \"boolean\",",
+	"\t\t\trequired: true",
+	"\t\t}",
+	"\t}",
+	"};"
+);
+const REMOVE_SCHEMA_V1 = L(
 	"const REMOVE_VALUE_SCHEMA = {",
 	"\ttype: \"object\",",
 	"\tadditionalProperties: false,",
@@ -260,7 +358,7 @@ const INTERRUPT_TOOL_OLD = L(
 	"\t\t\t}",
 	"\t\t})));"
 );
-const REMOVE_TOOL = L(
+const REMOVE_TOOL_V1 = L(
 	"\t\tregister(scoped.tools.register(defineTool({",
 	"\t\t\tname: \"remove_teammate\",",
 	"\t\t\tdescription: \"Remove one teammate from the Team roster. Team Lead only. Its current turn is interrupted and its activation released; list_agents no longer shows it, its name becomes available to spawn again, and its saved conversation stays on disk.\",",
@@ -280,27 +378,51 @@ const REMOVE_TOOL = L(
 	"\t\t\t}",
 	"\t\t})));"
 );
+const REMOVE_TOOL_V2 = L(
+	"\t\tregister(scoped.tools.register(defineTool({",
+	"\t\t\tname: \"remove_teammate\",",
+	"\t\t\tdescription: \"Remove one teammate from the Team roster and delete its saved conversation. Team Lead only. Its current turn is interrupted and its activation released; list_agents and the member panel no longer show it, its name and member slot are freed, and its session directory is deleted from disk.\",",
+	"\t\t\tparameters: { target: {",
+	"\t\t\t\ttype: \"string\",",
+	"\t\t\t\trequired: true,",
+	"\t\t\t\tdescription: \"Teammate target returned by spawn_teammate or list_agents.\"",
+	"\t\t\t} },",
+	"\t\t\toutput: jsonOutput(REMOVE_VALUE_SCHEMA),",
+	"\t\t\tasync execute(args, exec) {",
+	"\t\t\t\tconst result = await ctx.agentTeams.removeTeammate(callingAgent(exec.agent, \"remove_teammate\"), args.target);",
+	"\t\t\t\treturn {",
+	"\t\t\t\t\tremoved: true,",
+	"\t\t\t\t\ttarget: args.target,",
+	"\t\t\t\t\tpreviousStatus: result.previousStatus,",
+	"\t\t\t\t\tsessionDeleted: result.sessionDeleted === true",
+	"\t\t\t\t};",
+	"\t\t\t}",
+	"\t\t})));"
+);
 
 function patchTeam(source) {
-	if (source.includes(TEAM_MARK)) return source;
 	let text = source;
-	text = replaceAll(text, ENUM_OLD, ENUM_NEW, "member phase enum", 2);
-	text = replaceOnce(text, TRANSITION_OLD, TRANSITION_NEW, "member transition rule");
-	text = replaceOnce(text, LIST_OLD, LIST_NEW, "roster list filter");
-	text = replaceOnce(text, SPAWN_NAME_OLD, SPAWN_NAME_NEW, "spawn name and member-limit accounting");
-	text = replaceOnce(text, LIVE_CHILDREN_OLD, LIVE_CHILDREN_NEW, "live children projection");
-	text = replaceOnce(text, SETTLE_OLD, SETTLE_NEW, "spawn settle guard");
-	text = replaceOnce(text, ROSTER_INTERRUPT_OLD, ROSTER_INTERRUPT_OLD + "\n" + ROSTER_REMOVE_METHOD, "roster removeTeammate");
-	text = replaceOnce(text, SERVICE_INTERRUPT_OLD, SERVICE_INTERRUPT_OLD + "\n" + SERVICE_REMOVE_METHOD, "service removeTeammate");
+	if (!text.includes("\"failed\",\n\t\t\"removed\"")) text = replaceAll(text, ENUM_OLD, ENUM_NEW, "member phase enum", 2);
+	if (!text.includes("const allowed = prior.phase === \"provisioning\"")) text = replaceOnce(text, TRANSITION_OLD, TRANSITION_NEW, "member transition rule");
+	if (!text.includes("if (member.phase === \"removed\") continue;\n\t\t\tconst live")) text = replaceOnce(text, LIST_OLD, LIST_NEW, "roster list filter");
+	if (!text.includes("member.name === name && member.phase !== \"removed\"")) text = replaceOnce(text, SPAWN_NAME_OLD, SPAWN_NAME_NEW, "spawn name and member-limit accounting");
+	if (!text.includes("member.id === agent.id && member.phase !== \"removed\"")) text = replaceOnce(text, LIVE_CHILDREN_OLD, LIVE_CHILDREN_NEW, "live children projection");
+	if (!text.includes("settledPhase === \"removed\"")) text = replaceOnce(text, SETTLE_OLD, SETTLE_NEW, "spawn settle guard");
+	if (!text.includes("if (member.phase === \"removed\") continue;\n\t\tmembers.push({")) text = replaceOnce(text, PROJECTION_OLD, PROJECTION_NEW, "panel projection filter");
+	if (!text.includes("async function purgeMemberSession(id)")) text = replaceOnce(text, PURGE_ANCHOR, PURGE_HELPER + "\n" + PURGE_ANCHOR, "session purge helper");
+	if (text.includes(ROSTER_TAIL_V1)) text = replaceOnce(text, ROSTER_TAIL_V1, ROSTER_TAIL_V2, "roster removal tail upgrade");
+	if (!text.includes("async removeTeammate(caller, targetName) {")) text = replaceOnce(text, ROSTER_INTERRUPT_OLD, ROSTER_INTERRUPT_OLD + "\n" + ROSTER_REMOVE_METHOD, "roster removeTeammate");
+	if (!text.includes("this.roster.removeTeammate")) text = replaceOnce(text, SERVICE_INTERRUPT_OLD, SERVICE_INTERRUPT_OLD + "\n" + SERVICE_REMOVE_METHOD, "service removeTeammate");
 	return text;
 }
 
 function patchTool(source) {
-	if (source.includes(TOOL_MARK)) return source;
 	let text = source;
-	text = replaceOnce(text, POLICY_OLD, POLICY_NEW, "team policy sentence");
-	text = replaceOnce(text, INTERRUPT_SCHEMA_OLD, INTERRUPT_SCHEMA_OLD + "\n" + REMOVE_SCHEMA, "remove value schema");
-	text = replaceOnce(text, INTERRUPT_TOOL_OLD, INTERRUPT_TOOL_OLD + "\n" + REMOVE_TOOL, "remove_teammate tool");
+	if (!text.includes("for send_message, remove_teammate")) text = replaceOnce(text, POLICY_OLD, POLICY_NEW, "team policy sentence");
+	if (!text.includes("const REMOVE_VALUE_SCHEMA = {")) text = replaceOnce(text, INTERRUPT_SCHEMA_OLD, INTERRUPT_SCHEMA_OLD + "\n" + REMOVE_SCHEMA_V2, "remove value schema");
+	else if (!text.includes("sessionDeleted: {") && text.includes(REMOVE_SCHEMA_V1)) text = replaceOnce(text, REMOVE_SCHEMA_V1, REMOVE_SCHEMA_V2, "remove value schema upgrade");
+	if (!text.includes("name: \"remove_teammate\"")) text = replaceOnce(text, INTERRUPT_TOOL_OLD, INTERRUPT_TOOL_OLD + "\n" + REMOVE_TOOL_V2, "remove_teammate tool");
+	else if (text.includes(REMOVE_TOOL_V1)) text = replaceOnce(text, REMOVE_TOOL_V1, REMOVE_TOOL_V2, "remove_teammate tool upgrade");
 	return text;
 }
 
@@ -310,23 +432,21 @@ function main() {
 	const toolText = readFileSync(TOOL, "utf8");
 	const nextTeam = patchTeam(teamText);
 	const nextTool = patchTool(toolText);
-	const applied = nextTeam !== teamText || nextTool !== toolText;
+	const changed = nextTeam !== teamText || nextTool !== toolText;
 	if (CHECK_ONLY) {
-		console.log(JSON.stringify({ applied: !applied, team: digest(TEAM), tool: digest(TOOL) }, null, 2));
-		return applied ? 1 : 0;
+		console.log(JSON.stringify({ applied: !changed, team: digest(TEAM), tool: digest(TOOL) }, null, 2));
+		return changed ? 1 : 0;
 	}
 	mkdirSync(path.join(PATCHDIR, "originals"), { recursive: true });
 	const teamBackup = path.join(PATCHDIR, "originals/agent-team.index.js");
 	const toolBackup = path.join(PATCHDIR, "originals/tool-agent-team.index.js");
 	if (!existsSync(teamBackup)) writeFileSync(teamBackup, teamText);
 	if (!existsSync(toolBackup)) writeFileSync(toolBackup, toolText);
-	if (readFileSync(teamBackup, "utf8").includes(TEAM_MARK) || readFileSync(toolBackup, "utf8").includes(TOOL_MARK)) {
-		fail("backup is already patched; restore a pristine copy first");
-	}
 	if (nextTeam !== teamText) writeFileSync(TEAM, nextTeam);
 	if (nextTool !== toolText) writeFileSync(TOOL, nextTool);
 	writeFileSync(MANIFEST, JSON.stringify({
 		id: "team-member-remove-20261118",
+		version: 2,
 		applied_at: new Date().toISOString(),
 		files: [
 			{ package: "@deepseek-ai/dsh-experimental-agent-team", path: "node_modules/@deepseek-ai/dsh-experimental-agent-team/lib/index.js", original_sha256: digest(teamBackup), patched_sha256: digest(TEAM) },
@@ -334,14 +454,14 @@ function main() {
 		],
 		behavior: {
 			phase: "members gain a terminal `removed` phase; provisioning -> active|failed|removed, active|failed -> removed",
-			roster: "removed members are hidden from list_agents and free their name and member slot",
-			service: "agentTeams.removeTeammate(caller, name) interrupts the live turn, releases the activation, and appends the removal event",
-			tool: "Lead-only remove_teammate returns { removed: true, target, previousStatus }",
-			session: "conversation files stay on disk; only the roster entry is removed"
+			roster: "removed members are hidden from list_agents and from the agentTeam projection (Web member panel)",
+			service: "agentTeams.removeTeammate(caller, name) interrupts the live turn, releases the activation, appends the removal event, then deletes the saved session directory",
+			tool: "Lead-only remove_teammate returns { removed: true, target, previousStatus, sessionDeleted }",
+			session: "the teammate's sessions/<workspace>/session-<id> directory is removed (override root with DSH_SESSIONS_DIR)"
 		},
 		note: "Installed bundles are patched in place; restart DSH Desktop to load the change."
 	}, null, 2) + "\n");
-	console.log(JSON.stringify({ status: applied ? "patched" : "already-applied", manifest: MANIFEST }, null, 2));
+	console.log(JSON.stringify({ status: changed ? "patched" : "already-applied", manifest: MANIFEST }, null, 2));
 	return 0;
 }
 
