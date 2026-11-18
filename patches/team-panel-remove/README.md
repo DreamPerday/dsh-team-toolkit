@@ -44,3 +44,6 @@ Restore `.backups\originals\client-ui-agent-team.client.js` over the bundle and 
   `<button>`, so a nested button would be invalid); it stops click propagation.
 - If the host command channel is unavailable, the panel shows the error inline and nothing changes.
 - The confirmation-free control deletes the conversation; that is intentional for this workflow.
+## v3 (2026-11-18)
+
+Clicking × no longer deletes immediately: it opens an in-panel confirmation bar ("remove `<name>` and delete its conversation?") with explicit **删除 / 取消** buttons. The deletion runs only after the confirm button is pressed; cancel or closing/switching the session clears the pending target.

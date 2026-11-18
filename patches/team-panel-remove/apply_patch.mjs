@@ -1,16 +1,17 @@
 /**
- * In-place patch: add a manual "remove member" control to the Agent Teams panel.
+ * In-place patch: add a confirmed "remove member" control to the Agent Teams panel.
  *
  * The panel lists the roster from the Lead Session's `agentTeam` projection.
- * The control runs the host command `/team-remove <name>` through the client
- * Remote command channel, which removes the member from the roster and deletes
- * its saved session (requires the team-member-remove patch on the host).
+ * Each non-Lead row gets a × control; clicking it opens an in-panel confirmation
+ * ("remove <name> and its conversation?"), and only the confirm button runs the
+ * host command `/team-remove <name>` through the client Remote command channel.
  *
  * Usage:
  *   DSH_APP_DIR=<...> node apply_patch.mjs --check
  *   DSH_APP_DIR=<...> node apply_patch.mjs
  *
- * Idempotent; fails loudly on an ambiguous anchor. Refresh the page afterwards.
+ * Applies to the pristine client bundle (v3). Idempotent; fails loudly on an
+ * ambiguous anchor. Refresh the page afterwards.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -30,7 +31,7 @@ if (APP === undefined || APP.length === 0) {
 const CLIENT = path.join(APP, "node_modules/@deepseek-ai/dsh-experimental-client-ui-agent-team/lib/client.js");
 const PATCHDIR = process.env.DSH_PATCH_BACKUP_DIR ?? path.join(HERE, ".backups");
 const CHECK_ONLY = process.argv.includes("--check");
-const MARK = "removeTeammate(sessionId, memberName)";
+const MARK = "removeTarget";
 
 function fail(message) {
 	throw new Error(`team-panel-remove: ${message}`);
@@ -78,6 +79,24 @@ const ACTIONS_NEW = `			const actions = { openTeammate(sessionId, childSessionId
 const PROPS_OLD = "function TeamAction({ sessionId, useSession, useSessions, useSessionStatus, openTeammate, t }) {";
 const PROPS_NEW = "function TeamAction({ sessionId, useSession, useSessions, useSessionStatus, openTeammate, removeTeammate, t }) {";
 
+const STATE_OLD = `			const [error, setError] = (0, react.useState)(null);`;
+const STATE_NEW = `			const [error, setError] = (0, react.useState)(null);
+			const [removeTarget, setRemoveTarget] = (0, react.useState)(null);`;
+
+const RESET_OLD = `			(0, react.useEffect)(() => {
+				cancelHoverChange();
+				pinnedRef.current = false;
+				setOpen(false);
+				setError(null);
+			}, [sessionId]);`;
+const RESET_NEW = `			(0, react.useEffect)(() => {
+				cancelHoverChange();
+				pinnedRef.current = false;
+				setOpen(false);
+				setError(null);
+				setRemoveTarget(null);
+			}, [sessionId]);`;
+
 const ROWS_OLD = `									children: team.members.map((member) => (0, react_jsx_runtime.jsx)(TeamMemberRow, {
 										member,
 										memberCount: team.members.length,
@@ -108,7 +127,10 @@ const ROWS_NEW = `									children: team.members.map((member) => (0, react_jsx_
 											title: t("remove"),
 											onClick: (event) => {
 												event.stopPropagation();
-												Promise.resolve(removeTeammate(sessionId, member.name)).catch((reason) => setError(String(reason)));
+												setRemoveTarget({
+													id: member.id,
+													name: member.name
+												});
 											},
 											style: {
 												position: "absolute",
@@ -124,17 +146,47 @@ const ROWS_NEW = `									children: team.members.map((member) => (0, react_jsx_
 										})]
 									}, member.id))`;
 
+const ERROR_BAR_OLD = `							error !== null && (0, react_jsx_runtime.jsxs)("div", {
+								className: TeamAction_module_css_default.error,
+								role: "alert",
+								children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.StateDot, { state: "error" }), error]
+							}),`;
+const ERROR_BAR_NEW = ERROR_BAR_OLD + `
+							removeTarget !== null && (0, react_jsx_runtime.jsxs)("div", {
+								className: TeamAction_module_css_default.notice,
+								role: "alertdialog",
+								style: { flexWrap: "wrap" },
+								children: [(0, react_jsx_runtime.jsx)("span", {
+									children: t("confirmRemove", { name: removeTarget.name })
+								}), (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									onClick: () => {
+										const target = removeTarget;
+										setRemoveTarget(null);
+										Promise.resolve(removeTeammate(sessionId, target.name)).catch((reason) => setError(String(reason)));
+									},
+									children: t("confirm")
+								}), (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									onClick: () => setRemoveTarget(null),
+									children: t("cancel")
+								})]
+							}),`;
+
 const ZH_OLD = '\t\t\topen: "打开成员会话",';
-const ZH_NEW = '\t\t\topen: "打开成员会话",\n\t\t\tremove: "移除成员并删除会话",';
+const ZH_NEW = '\t\t\topen: "打开成员会话",\n\t\t\tremove: "移除成员",\n\t\t\tconfirmRemove: "删除队友 {name} 及其会话？此操作不可恢复。",\n\t\t\tconfirm: "删除",\n\t\t\tcancel: "取消",';
 const EN_OLD = '\t\t\topen: "Open member conversation",';
-const EN_NEW = '\t\t\topen: "Open member conversation",\n\t\t\tremove: "Remove member and delete conversation",';
+const EN_NEW = '\t\t\topen: "Open member conversation",\n\t\t\tremove: "Remove member",\n\t\t\tconfirmRemove: "Remove teammate {name} and delete its conversation? This cannot be undone.",\n\t\t\tconfirm: "Delete",\n\t\t\tcancel: "Cancel",';
 
 function patch(source) {
 	if (source.includes(MARK)) return source;
 	let text = source;
 	text = replaceOnce(text, ACTIONS_OLD, ACTIONS_NEW, "panel actions");
 	text = replaceOnce(text, PROPS_OLD, PROPS_NEW, "TeamAction props");
+	text = replaceOnce(text, STATE_OLD, STATE_NEW, "confirmation state");
+	text = replaceOnce(text, RESET_OLD, RESET_NEW, "reset on session change");
 	text = replaceOnce(text, ROWS_OLD, ROWS_NEW, "roster row wrapper");
+	text = replaceOnce(text, ERROR_BAR_OLD, ERROR_BAR_NEW, "confirmation bar");
 	text = replaceOnce(text, ZH_OLD, ZH_NEW, "zh dictionary");
 	text = replaceOnce(text, EN_OLD, EN_NEW, "en dictionary");
 	return text;
@@ -155,11 +207,12 @@ function main() {
 	if (changed) writeFileSync(CLIENT, next);
 	writeFileSync(path.join(PATCHDIR, "manifest.json"), JSON.stringify({
 		id: "team-panel-remove-20261118",
+		version: 3,
 		applied_at: new Date().toISOString(),
 		file: "node_modules/@deepseek-ai/dsh-experimental-client-ui-agent-team/lib/client.js",
 		original_sha256: digest(backup),
 		patched_sha256: digest(CLIENT),
-		behavior: "each non-lead roster row gains a × control that runs /team-remove <name> through the client Remote command channel; removed members disappear from the panel",
+		behavior: "each non-Lead roster row gains a × control that opens an in-panel confirmation; only the confirm button runs /team-remove <name> through the client Remote command channel",
 		note: "Client bundle is served from disk; refresh the Web UI page to load it."
 	}, null, 2) + "\n");
 	console.log(JSON.stringify({ status: changed ? "patched" : "already-applied" }, null, 2));
