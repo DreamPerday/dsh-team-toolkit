@@ -465,4 +465,6 @@ function main() {
 	return 0;
 }
 
-process.exit(main());
+const exitCode = main();
+if (exitCode === 0 && !CHECK_ONLY) await import("./apply_session_purge_v3.mjs");
+process.exit(exitCode);
