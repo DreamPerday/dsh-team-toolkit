@@ -54,6 +54,7 @@ const INJECT_NEW = `		const inject = [
 			"uiWorkspace",
 			"slots",
 			"locale",
+			"remote",
 			"remote.commands"
 		];`;
 
