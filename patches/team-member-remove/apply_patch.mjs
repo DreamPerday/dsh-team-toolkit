@@ -467,4 +467,5 @@ function main() {
 
 const exitCode = main();
 if (exitCode === 0 && !CHECK_ONLY) await import("./apply_session_purge_v3.mjs");
+	await import("./apply_fix_v4.mjs");
 process.exit(exitCode);
