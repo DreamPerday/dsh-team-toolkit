@@ -62,10 +62,27 @@ Rollback: `plugin_manager action=remove_bundle target="dsh-team-compact"`.
 node verify.mjs
 ```
 
-25 offline checks against a fake Cordis context: per-member tool registration, new members getting
-the tool on `agent/created`, non-members getting nothing, the three modes, the idle guard, the
-Lead-only session-id rule, summary failures reported as `compactionError`, and the command's usage
-and success paths.
+40 offline checks against a fake Cordis context: per-member registration of all three tools,
+new members getting the tools on `agent/created`, non-members getting nothing, the three
+compaction modes, the idle guard, the Lead-only session-id rule, summary failures reported as
+`compactionError`, command usage/success paths, and complete object-shaped JSON Schemas with
+required arguments declared inside `parameters`.
+
+### 0.1.1: strict gateway compatibility
+
+The `compact_context`, `retire_teammate`, and `restore_teammate` input declarations now use
+`parameters: { type: "object", properties: {...}, required: [...] }`. Previously they used an
+unwrapped property map and placed `required` outside `parameters`, which OpenDesign rejected
+with HTTP 400 `upstream_error`. Tool implementations, permission checks, routing, and session
+history are unchanged. The format correction applies to all model providers.
+
+The original test fixture predated the DSH 0.2.2 Team API and failed before reaching its
+assertions; this release updates the fixture to `agentTeams.isEnabled` and the subagent-tree
+API. It does not change the production membership implementation.
+
+After updating an already loaded bundle, follow Plugin Manager's activation result. A restart
+may be required to replace the cached JavaScript module; a successful package update alone
+does not prove that existing sessions use the corrected schemas.
 
 ## Files
 

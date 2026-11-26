@@ -274,15 +274,19 @@ export function apply(ctx) {
     description:
       "Manually prune and/or compact a Team member's conversation context. The target must be idle (no turn running). The Team Lead may target a member name or an exact live session id; a teammate may only compact itself. Prune is LLM-free; compact summarizes with the target's routed model and fails when the target's context already exceeds that model's window.",
     parameters: {
-      target: { type: "string", description: "Member name, 'lead', or 'self'. Defaults to 'self'." },
-      session: { type: "string", description: "Exact live session id. Lead only; overrides target." },
-      mode: {
-        type: "string",
-        enum: ["auto", "prune", "compact"],
-        description: "auto prunes, then summarizes only when the estimate is near the model window. Defaults to auto.",
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        target: { type: "string", description: "Member name, 'lead', or 'self'. Defaults to 'self'." },
+        session: { type: "string", description: "Exact live session id. Lead only; overrides target." },
+        mode: {
+          type: "string",
+          enum: ["auto", "prune", "compact"],
+          description: "auto prunes, then summarizes only when the estimate is near the model window. Defaults to auto.",
+        },
       },
+      required: [],
     },
-    required: [],
     output: {
       schema: VALUE_SCHEMA,
       render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
@@ -309,9 +313,13 @@ export function apply(ctx) {
     description:
       "Retire one teammate: archive its session and stop its running work. Team Lead only. A retired member cannot run again until restored; its history is kept and it may still appear in the roster. Use this to free a teammate slot or stop a runaway member without deleting history.",
     parameters: {
-      target: { type: "string", description: "Member name as shown by list_agents." },
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        target: { type: "string", description: "Member name as shown by list_agents." },
+      },
+      required: ["target"],
     },
-    required: ["target"],
     output: {
       schema: RETIRE_SCHEMA,
       render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
@@ -326,9 +334,13 @@ export function apply(ctx) {
     description:
       "Restore one retired teammate: remove its session from the archive set so it can run again. Team Lead only.",
     parameters: {
-      target: { type: "string", description: "Member name as shown by list_agents." },
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        target: { type: "string", description: "Member name as shown by list_agents." },
+      },
+      required: ["target"],
     },
-    required: ["target"],
     output: {
       schema: RETIRE_SCHEMA,
       render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],

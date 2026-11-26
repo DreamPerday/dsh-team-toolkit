@@ -52,6 +52,7 @@ function fakeHost({ members, teams, window } = {}) {
   const listeners = new Map();
   const disposers = [];
   const roster = teams ?? {
+    isEnabled: (agent) => agent.membership !== undefined,
     tryMembership: (agent) => agent.membership,
     listMembers: () => agents.filter((agent) => agent.membership !== undefined).map((agent) => ({
       id: agent.id,
@@ -61,6 +62,18 @@ function fakeHost({ members, teams, window } = {}) {
   };
   const services = new Map([
     ["agentTeams", roster],
+    ["subagents", {
+      rootOf: (agent) => agent.membership?.role === "teammate"
+        ? agents.find((item) => item.membership?.role === "lead") ?? { id: "s-lead" }
+        : agent,
+      listDescendants: async () => agents.filter((agent) => agent.membership?.role === "teammate")
+        .map((agent) => ({ kind: "child", id: agent.id, name: agent.membership.name, path: agent.membership.name })),
+      resolveName: async (_caller, name) => {
+        const member = agents.find((agent) => agent.membership?.name === name);
+        if (!member) throw new Error(`no Team member named "${name}"`);
+        return member.id;
+      },
+    }],
     [
       "tokenMeter",
       {
@@ -123,9 +136,18 @@ function compactionService(agent, { shadowed = 4200, fail } = {}) {
   const outsider = fakeAgent("s-sub");
   const ctx = fakeHost({ members: [lead, mate, outsider] });
   apply(ctx);
-  check("command registered", ctx.commandList.length === 1, `got ${ctx.commandList.length}`);
-  check("lead got the tool", lead.tools.length === 1, `got ${lead.tools.length}`);
-  check("teammate got the tool", mate.tools.length === 1, `got ${mate.tools.length}`);
+  check("three commands registered", ctx.commandList.length === 3, `got ${ctx.commandList.length}`);
+  check("lead got three tools", lead.tools.length === 3, `got ${lead.tools.length}`);
+  check("teammate got three tools", mate.tools.length === 3, `got ${mate.tools.length}`);
+  for (const tool of lead.tools) {
+    check(`${tool.name}: object schema`, tool.parameters.type === "object");
+    check(`${tool.name}: properties declared`, tool.parameters.properties?.target?.type === "string");
+    check(`${tool.name}: required inside parameters`, Array.isArray(tool.parameters.required) && !("required" in tool));
+    check(`${tool.name}: no undeclared arguments`, tool.parameters.additionalProperties === false);
+  }
+  check("compact arguments remain optional", lead.tools[0].parameters.required.length === 0);
+  check("retire target required", JSON.stringify(lead.tools[1].parameters.required) === '["target"]');
+  check("restore target required", JSON.stringify(lead.tools[2].parameters.required) === '["target"]');
   check("non-team agent got nothing", outsider.tools.length === 0, `got ${outsider.tools.length}`);
   check("tool name", lead.tools[0]?.name === "compact_context", lead.tools[0]?.name);
   ctx.disposers.reverse().forEach((dispose) => dispose?.());
@@ -141,7 +163,7 @@ function compactionService(agent, { shadowed = 4200, fail } = {}) {
   late.membership = { role: "teammate", name: "late" };
   ctx.agents.list = () => [lead, late];
   ctx.emit("agent/created", { agent: late });
-  check("late teammate got the tool", late.tools.length === 1, `got ${late.tools.length}`);
+  check("late teammate got three tools", late.tools.length === 3, `got ${late.tools.length}`);
   ctx.disposers.reverse().forEach((dispose) => dispose?.());
 }
 

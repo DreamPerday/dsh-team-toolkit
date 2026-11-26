@@ -1,6 +1,6 @@
 {
     "name":  "dsh-team-compact",
-    "version":  "0.1.0",
+    "version":  "0.1.1",
     "private":  true,
     "description":  "Manual context compaction for DSH Agent Teams: a scoped compact_context tool plus the /compact-agent human command.",
     "type":  "module",
