@@ -89,6 +89,9 @@ degraded inputs, and the guarantee that retire asks before it acts.
 
 - The roster is the root Session's **catalog**, so a member whose session was
   archived outside this panel still lists until the catalog is re-read.
+- A member that has never been opened in this browser has no `contextPressure` (that projection is
+  summary-excluded and arrives only once a Session is retained), so its row reads `Context not
+  opened` instead of a bar. Open the member once and the next render shows a bar.
 - No rename, no per-member model switch: those belong to the Session, not the panel.
 - Archiving is not deletion. Deleting history would need an unsupported write to
   the session directory.

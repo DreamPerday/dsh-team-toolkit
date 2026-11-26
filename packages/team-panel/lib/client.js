@@ -41,6 +41,7 @@ window.__ModuleLoader__.load({
       "noTasks": "共享任务板为空。",
       "context": "上下文",
       "unknown": "未知",
+      "notOpened": "未打开",
       "running": "运行中",
       "idle": "空闲",
       "openChat": "打开",
@@ -75,6 +76,7 @@ window.__ModuleLoader__.load({
       "noTasks": "The shared task board is empty.",
       "context": "Context",
       "unknown": "unknown",
+      "notOpened": "not opened",
       "running": "running",
       "idle": "idle",
       "openChat": "Open",
@@ -320,7 +322,13 @@ window.__ModuleLoader__.load({
               ? pressure.pressureTokens
               : undefined;
       const fraction = windowSize !== undefined && used !== undefined && windowSize > 0 ? Math.min(1, used / windowSize) : undefined;
-      const running = member.summary !== undefined && member.summary.running === true;
+      // A member that has never been opened has no `contextPressure` (that
+      // projection is summary-excluded), but the catalog still reports its
+      // activity, so the state dot stays truthful without loading anything.
+      const running =
+        member.activity !== undefined
+          ? member.activity === "running"
+          : member.summary !== undefined && member.summary.running === true;
       const state = retired ? "retired" : running ? "running" : "idle";
 
       const run = async (task, failureLabel) => {
@@ -373,7 +381,7 @@ window.__ModuleLoader__.load({
         h(
           "div",
           { className: "tp-row" },
-          h("span", { className: "tp-muted" }, `${t("context")} ${used === undefined ? "?" : tokens(used)}`),
+          h("span", { className: "tp-muted" }, used === undefined ? `${t("context")} ${t("notOpened")}` : `${t("context")} ${tokens(used)}`),
           h(
             "div",
             {
@@ -460,7 +468,8 @@ window.__ModuleLoader__.load({
           name: entry.name,
           lead: false,
           summary: summaries === undefined ? undefined : summaries[entry.id],
-          pressure: owned === undefined ? undefined : owned.values.contextPressure,
+          activity: entry.activity,
+          pressure: owned === undefined || owned.values === undefined ? undefined : owned.values.contextPressure,
         });
       }
       const tasks = team === undefined || team.tasks === undefined ? [] : team.tasks.filter((task) => task.status !== "deleted");
