@@ -57,6 +57,15 @@ Everything comes from shipped seams:
 The plugin registers no tool, no prompt section, and no Session event, so a
 Session running with it sends a byte-identical model request to one without it.
 
+## 0.1.1: the overlay renders in a root-scoped slot
+
+`shell.overlay` is root-scoped: it receives neither `sessionId` nor `useProjection`. 0.1.0 read the
+projections through both and threw `useProjection is not a function` on every frame render, which
+took the whole conversation header down with it. 0.1.1 reads every projection through `useSessions`
+and takes the addressed Session from a store the header trigger writes, so the panel has no
+Session-scoped dependency at all. `verify.mjs` now renders the overlay with root-scope props only and
+asserts that the source never calls `useProjection`.
+
 ## Verify
 
 ```powershell

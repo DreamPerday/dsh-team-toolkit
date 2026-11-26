@@ -54,6 +54,13 @@ Host 重载。
 插件不注册工具、不加提示段落、不写会话事件，因此带它的会话与不带它的会话发出完全相同的
 模型请求（缓存前缀不受影响）。
 
+## 0.1.1：浮层在 root 作用域也能渲染
+
+`shell.overlay` 是 root 作用域，既没有 `sessionId` 也没有 `useProjection`。0.1.0 两者都用，导致每次
+渲染都抛 `useProjection is not a function`，把整个会话页头一起带崩。0.1.1 全部改用 `useSessions`
+读投影，要操作的会话改为从页头入口写入的 store 取，面板不再有任何会话作用域依赖。
+`verify.mjs` 现在只用 root 作用域 props 渲染浮层，并断言源码里不出现 `useProjection`。
+
 ## 验证
 
 ```powershell
