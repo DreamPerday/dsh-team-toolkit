@@ -1,22 +1,23 @@
 # dsh-team-toolkit
 
-Two small, additive plugins for **DSH Agent Teams** ([DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)).
-Neither plugin edits a shipped package, and neither changes the model-visible request unless
-you explicitly call its tool.
+Three small, additive plugins for **DSH Agent Teams** ([DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)).
+None of them edits a shipped package. The first adds a tool and a command; the other two add
+no model-visible input at all.
 
 | Package | What it does | Model surface |
 |---|---|---|
 | [`packages/team-compact`](packages/team-compact/README.md) | Manual context compaction for the Lead and every teammate: a scoped `compact_context` tool plus the `/compact-agent` command. | Adds one tool + one human command |
 | [`packages/team-ext`](packages/team-ext/README.md) | Observation-only audit: records per-request cache usage and every prompt-prefix rewrite (compaction, prune, series reset) to JSONL, with an analysis script. | Adds no tool and no prompt section |
+| [`packages/team-panel`](packages/team-panel/README.md) | Web GUI panel: member roster with a context-occupancy bar each, retire/restore backed by the Workspace archive, and the shared-task dependency graph. | Adds no tool and no prompt section |
 
 Both are Cordis bundles (`dsh.bundle` manifest) and install into a DSH profile without touching
 `resources/app`.
 
 ## Install
 
-Requirements: DSH Desktop with the experimental Agent Teams profile
-(`@deepseek-ai/dsh-experimental-agent-team-profile`), i.e. the Lead gets `spawn_teammate` and
-teammates exist.
+Requirements: DSH Desktop with Agent Teams available. On 0.2.2 that ships in the base
+bundle: a Team is the subagent tree of one root Session, and the per-Session switch is
+**Enable agent teamwork** in the model menu (or `defaultEnabled: true` on the `agent-team` row).
 
 From a local clone (recommended while the packages are not in a registry):
 
@@ -25,6 +26,7 @@ git clone https://github.com/DreamPerday/dsh-team-toolkit.git
 # in DSH: ask the agent, or call the plugin manager, with the absolute package directory
 plugin_manager action=install_bundle target="<clone>\packages\team-compact"
 plugin_manager action=install_bundle target="<clone>\packages\team-ext"
+plugin_manager action=install_bundle target="<clone>\packages\team-panel"
 ```
 
 Both packages are `link`-installed, so the clone must stay where it is. Restart DSH Desktop after
@@ -36,6 +38,7 @@ Remove with:
 ```text
 plugin_manager action=remove_bundle target="dsh-team-compact"
 plugin_manager action=remove_bundle target="dsh-team-ext"
+plugin_manager action=remove_bundle target="dsh-team-panel"
 ```
 
 ## Why these exist

@@ -1,19 +1,21 @@
 # dsh-team-toolkit
 
-两个**增量式**的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）
-Agent Teams 插件。都不修改官方安装包；除非你主动调用工具，否则不改变模型可见的请求。
+三个**增量式**的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）
+Agent Teams 插件。都不修改官方安装包；第一个加工具，后两个完全不改变模型可见的输入。
 
 | 包 | 作用 | 对模型的影响 |
 |---|---|---|
 | [`packages/team-compact`](packages/team-compact/README.md) | 团队手动上下文压缩：Lead 与每个队友按成员 scope 获得 `compact_context` 工具，另有 `/compact-agent` 命令 | 增加 1 个工具 + 1 个命令 |
 | [`packages/team-ext`](packages/team-ext/README.md) | 纯观测审计：把每请求缓存用量与所有前缀重写事件（压缩、裁剪、序列重置）落成 JSONL，并带分析脚本 | 不加工具、不加 prompt 段 |
+| [`packages/team-panel`](packages/team-panel/README.md) | Web GUI 团队面板：成员名册（每人一条上下文占用条）、基于 Workspace 归档的移除/恢复、共享任务依赖图 | 不加工具、不加 prompt 段 |
 
-两个包都是 Cordis bundle（声明 `dsh.bundle`），装进 DSH profile，不碰 `resources/app`。
+三个包都是 Cordis bundle（声明 `dsh.bundle`），装进 DSH profile，不碰应用安装包。
 
 ## 安装
 
-前提：DSH Desktop 已启用实验性 Agent Teams profile
-（`@deepseek-ai/dsh-experimental-agent-team-profile`），即 Lead 有 `spawn_teammate`、能创建队友。
+前提：DSH Desktop 可用 Agent Teams。0.2.2 起它就在基础包里：一个团队等于某个根会话的
+subagent 树，开关是模型菜单里的「启用智能体团队协作」（或在 `agent-team` 行设
+`defaultEnabled: true`）。
 
 本地 clone 安装（包尚未进 registry 时推荐）：
 
@@ -22,6 +24,7 @@ git clone https://github.com/DreamPerday/dsh-team-toolkit.git
 # 在 DSH 里调用插件管理器，target 指向子包的绝对路径
 plugin_manager action=install_bundle target="<clone>\packages\team-compact"
 plugin_manager action=install_bundle target="<clone>\packages\team-ext"
+plugin_manager action=install_bundle target="<clone>\packages\team-panel"
 ```
 
 两个包以 `link` 方式安装，clone 目录不能移动。首次安装后如果 profile 不能热加载插件模块
@@ -32,6 +35,7 @@ plugin_manager action=install_bundle target="<clone>\packages\team-ext"
 ```text
 plugin_manager action=remove_bundle target="dsh-team-compact"
 plugin_manager action=remove_bundle target="dsh-team-ext"
+plugin_manager action=remove_bundle target="dsh-team-panel"
 ```
 
 ## 为什么做这两个插件
