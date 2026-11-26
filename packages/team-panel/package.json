@@ -1,6 +1,6 @@
 {
   "name": "dsh-team-panel",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Rich Agent-Teams panel for the DSH Web GUI: member roster with context-occupancy bars, retire/restore, and a shared-task dependency graph.",
   "type": "module",
   "private": true,
