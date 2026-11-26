@@ -233,6 +233,41 @@ export async function runCompaction(ctx, caller, request, signal) {
  * Register the scoped tool for one Team member and the global human command.
  * @param {import("@deepseek-ai/cordis").Context} ctx
  */
+/**
+ * Archive or unarchive one teammate session through the Workspace registry.
+ * Archiving stops running work; the history stays and the roster may still list it.
+ * @returns {Promise<object>} the tool value
+ */
+export async function setRetired(ctx, caller, target, signal, restore) {
+  const subagents = subagentsOf(ctx);
+  const registry = ctx.get?.("workspaceRegistry");
+  if (subagents === undefined) throw new Error("the subagents service is unavailable");
+  if (registry === undefined || typeof registry.archiveSession !== "function") {
+    throw new Error("the workspaceRegistry service is unavailable; cannot archive sessions");
+  }
+  let root = caller;
+  try {
+    root = subagents.rootOf?.(caller) ?? caller;
+  } catch {}
+  if (root.id !== caller.id) throw new Error("only the Team Lead may retire or restore teammates");
+  const name = String(target ?? "").trim();
+  if (name.length === 0) throw new Error("target member name is required");
+  const id = await subagents.resolveName(caller, name, signal);
+  if (restore) await registry.unarchiveSession(id);
+  else await registry.archiveSession(id, { stopActivity: true });
+  const archived = Array.isArray(registry.archivedSessionIds) ? registry.archivedSessionIds.includes(id) : undefined;
+  return {
+    target: name,
+    session: String(id),
+    retired: restore !== true,
+    ...(archived === undefined ? {} : { archived }),
+  };
+}
+
+/**
+ * Register the scoped tool for one Team member and the global human command.
+ * @param {import("@deepseek-ai/cordis").Context} ctx
+ */
 export function apply(ctx) {
   const tool = {
     name: "compact_context",
@@ -257,26 +292,76 @@ export function apply(ctx) {
     },
   };
 
-  /** @type {Map<object, () => void>} */
+  const RETIRE_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      target: { type: "string" },
+      session: { type: "string" },
+      retired: { type: "boolean" },
+      archived: { type: "boolean" },
+    },
+    required: ["target", "session", "retired"],
+  };
+
+  const retireTool = {
+    name: "retire_teammate",
+    description:
+      "Retire one teammate: archive its session and stop its running work. Team Lead only. A retired member cannot run again until restored; its history is kept and it may still appear in the roster. Use this to free a teammate slot or stop a runaway member without deleting history.",
+    parameters: {
+      target: { type: "string", description: "Member name as shown by list_agents." },
+    },
+    required: ["target"],
+    output: {
+      schema: RETIRE_SCHEMA,
+      render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
+    },
+    execute(args, exec) {
+      return setRetired(ctx, exec.agent, args?.target, exec.signal, false);
+    },
+  };
+
+  const restoreTool = {
+    name: "restore_teammate",
+    description:
+      "Restore one retired teammate: remove its session from the archive set so it can run again. Team Lead only.",
+    parameters: {
+      target: { type: "string", description: "Member name as shown by list_agents." },
+    },
+    required: ["target"],
+    output: {
+      schema: RETIRE_SCHEMA,
+      render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
+    },
+    execute(args, exec) {
+      return setRetired(ctx, exec.agent, args?.target, exec.signal, true);
+    },
+  };
+
+  /** @type {Map<object, Array<() => void>>} */
   const installed = new Map();
+  const tools = [tool, retireTool, restoreTool];
   const maybeInstall = (agent) => {
     if (installed.has(agent)) return;
     if (!inTeam(ctx, agent)) return;
     try {
-      installed.set(agent, agent.ctx.tools.register(tool));
+      installed.set(
+        agent,
+        tools.map((entry) => agent.ctx.tools.register(entry)),
+      );
     } catch (error) {
-      ctx.logger?.warn?.(`cannot register the compact tool for one member: ${error?.message ?? error}`);
+      ctx.logger?.warn?.(`cannot register the team tools for one member: ${error?.message ?? error}`);
     }
   };
   for (const agent of ctx.agents.list()) maybeInstall(agent);
   ctx.on("agent/created", ({ agent }) => maybeInstall(agent));
   ctx.on("agent/disposed", ({ agent }) => {
-    installed.get(agent)?.();
+    for (const dispose of installed.get(agent) ?? []) dispose();
     installed.delete(agent);
   });
   ctx.effect(
     () => () => {
-      for (const dispose of installed.values()) dispose();
+      for (const disposers of installed.values()) for (const dispose of disposers) dispose();
       installed.clear();
     },
     "team-compact.scopedTools()",
@@ -300,6 +385,42 @@ export function apply(ctx) {
           kind: "success",
           text: `${value.target}: ${value.before} → ${value.after} estimated tokens (pruned ${value.prunedItems} results, ${value.prunedChars} chars)${detail}`,
         };
+      } catch (error) {
+        return { kind: "error", text: String(error?.message ?? error) };
+      }
+    },
+  });
+
+  const RETIRE_USAGE = "Usage: /team-retire <member-name>";
+  ctx.commands.register({
+    definitionId: "dsh-team-compact/team-retire",
+    name: "team-retire",
+    description: "Archive one Team member's session and stop its work (reversible)",
+    async handler(invocation) {
+      const parts = String(invocation.rawInput ?? "").trim().split(/\s+/).filter((part) => part.length > 0);
+      if (parts.length !== 1) return { kind: "error", text: RETIRE_USAGE };
+      try {
+        const value = await setRetired(ctx, invocation.agent, parts[0], invocation.signal, false);
+        return {
+          kind: "success",
+          text: `retired ${value.target} (session ${value.session}); it cannot run until /team-restore ${value.target}`,
+        };
+      } catch (error) {
+        return { kind: "error", text: String(error?.message ?? error) };
+      }
+    },
+  });
+
+  ctx.commands.register({
+    definitionId: "dsh-team-compact/team-restore",
+    name: "team-restore",
+    description: "Restore one retired Team member",
+    async handler(invocation) {
+      const parts = String(invocation.rawInput ?? "").trim().split(/\s+/).filter((part) => part.length > 0);
+      if (parts.length !== 1) return { kind: "error", text: "Usage: /team-restore <member-name>" };
+      try {
+        const value = await setRetired(ctx, invocation.agent, parts[0], invocation.signal, true);
+        return { kind: "success", text: `restored ${value.target} (session ${value.session})` };
       } catch (error) {
         return { kind: "error", text: String(error?.message ?? error) };
       }

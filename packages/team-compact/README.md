@@ -75,3 +75,18 @@ and success paths.
 | `package.json` | bundle manifest (`dsh.bundle.patch`) |
 | `cordis.patch.yml` | one composition insert |
 | `verify.mjs` | offline verification |
+## Retire / restore (0.2.2+)
+
+0.2.2 has no session-delete API: history is append-only. The supported lifecycle
+operation is the Workspace registry's archive, exposed here as:
+
+- tool `retire_teammate({ target })` / command `/team-retire <name>`
+- tool `restore_teammate({ target })` / command `/team-restore <name>`
+
+Retiring calls `workspaceRegistry.archiveSession(id, { stopActivity: true })`: running
+work is stopped, the session is durably archived, and the archived-session gate rejects
+any further model step until restore. History is kept.
+
+Limitation: the subagent catalog does not read the archive set, so a retired member can
+still appear in the roster/panel; it simply cannot run. Hiding it requires a client
+panel that filters `archivedSessionIds`, or an unsupported session-directory delete.
