@@ -8,11 +8,14 @@
  *     archived members filtered out of the live roster
  *   - the shared-task dependency graph drawn as layered columns
  *
- * Everything here is shipped API: `useProjection('agentTeam')` for tasks,
- * `useProjection('subagentCatalog')` for members, `useSessions` for each member's
- * own `contextPressure` and running state, `useWorkspaces` for the archive set,
- * and the `uiWorkspace` Client service for archive/unarchive/open. The plugin
- * reads no Session events, registers no tool, and changes no model request.
+ * Everything here is shipped API: the `agentTeam` projection for tasks, the
+ * `subagentCatalog` projection for members, each member's `contextPressure`
+ * projection for the occupancy bar, the Workspace archive set, and the
+ * `uiWorkspace` Client service for archive/unarchive/open. All of them are read
+ * through `useSessions`, because the panel lives in the root-scoped
+ * `shell.overlay` slot, which receives neither `sessionId` nor `useProjection`.
+ * The plugin reads no Session events, registers no tool, and changes no model
+ * request.
  */
 window.__ModuleLoader__.load({
   id: "dsh-team-panel",
@@ -408,17 +411,33 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Read one projection value for a Session from the list snapshot.
+     *
+     * Everything here comes from `useSessions`, not from `useProjection`, so the
+     * same hook works in a Session-scoped slot and in the root-scoped
+     * `shell.overlay` (which receives neither `sessionId` nor `useProjection`).
+     */
+    function readProjection(projections, sessionId, key) {
+      if (projections === undefined || sessionId === undefined || sessionId === null) return undefined;
+      const owned = projections[sessionId];
+      if (owned === undefined || owned.values === undefined) return undefined;
+      return owned.values[key];
+    }
+
+    /**
      * Read the panel's data from the Session projections and the Workspace
      * snapshot. Every hook runs unconditionally on every render.
+     * @param props - slot props plus the addressed `sessionId`.
      */
-    function useTeamData(props) {
-      const { sessionId, useProjection, useSessions, useWorkspaces } = props;
-      const catalog = useProjection("subagentCatalog");
-      const team = useProjection("agentTeam");
-      const leadPressure = useProjection("contextPressure");
+    function useTeamData(props, sessionId) {
+      const useSessions = props.useSessions;
+      const useWorkspaces = props.useWorkspaces;
       const projections = useSessions((state) => state.projectionsBySession);
       const summaries = useSessions((state) => state.byId);
       const archivedIds = useWorkspaces((state) => state.archivedSessionIds);
+      const catalog = readProjection(projections, sessionId, "subagentCatalog");
+      const team = readProjection(projections, sessionId, "agentTeam");
+      const leadPressure = readProjection(projections, sessionId, "contextPressure");
 
       const archived = new Set(archivedIds === undefined ? [] : archivedIds);
       const members = [];
@@ -448,17 +467,17 @@ window.__ModuleLoader__.load({
       return { members, tasks, archived, enabled: team !== undefined && team.enabled === true };
     }
 
-    /** Header action: opens the panel and carries the live counts. */
+    /** Header action: opens the panel for this Session and carries the live counts. */
     function TeamPanelTrigger(props) {
-      const { t } = props;
-      const data = useTeamData(props);
+      const { t, sessionId } = props;
+      const data = useTeamData(props, sessionId);
       const live = data.members.filter((member) => !data.archived.has(member.id)).length;
       return h(
         "button",
         {
           type: "button",
           className: "tp-button",
-          onClick: () => props.openPanel(),
+          onClick: () => props.openPanel(sessionId),
           title: t("open"),
           "data-team-panel-trigger": "",
         },
@@ -469,11 +488,18 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** The overlay panel: roster, occupancy, retire/restore, dependency graph. */
+    /**
+     * The overlay panel: roster, occupancy, retire/restore, dependency graph.
+     *
+     * `shell.overlay` is root-scoped, so the addressed Session comes from the
+     * store the header trigger writes — not from a slot prop.
+     */
     function TeamPanel(props) {
-      const { t, close, isOpen, actions } = props;
-      const data = useTeamData(props);
-      const open = isOpen();
+      const { t, close, visibility, actions } = props;
+      const target = React.useSyncExternalStore(visibility.subscribe, visibility.getSnapshot, visibility.getSnapshot);
+      const sessionId = target === null || target === undefined ? undefined : target.sessionId;
+      const data = useTeamData(props, sessionId);
+      const open = sessionId !== undefined;
       React.useEffect(() => {
         if (!open) return undefined;
         const onKey = (event) => {
@@ -567,20 +593,22 @@ window.__ModuleLoader__.load({
       }, "team-panel: stylesheet");
 
       /** Panel visibility shared by the trigger and the overlay. */
-      let open = false;
+      let target = null;
       const listeners = new Set();
-      const setOpen = (value) => {
-        if (open === value) return;
-        open = value;
+      const setTarget = (value) => {
+        if (target === value) return;
+        target = value;
         for (const listener of listeners) listener();
       };
-      const subscribe = (listener) => {
-        listeners.add(listener);
-        return () => {
-          listeners.delete(listener);
-        };
+      const visibility = {
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+        getSnapshot: () => target,
       };
-      const isOpen = () => open;
 
       /** Workspace archive operations: absent services fail loudly in the row. */
       const workspace = () => {
@@ -591,7 +619,7 @@ window.__ModuleLoader__.load({
       const actions = {
         open: (sessionId) => {
           workspace().openSession(sessionId);
-          setOpen(false);
+          setTarget(null);
         },
         retire: (sessionId) => workspace().archiveSession(sessionId, { stopActivity: true }),
         restore: (sessionId) => workspace().unarchiveSession(sessionId),
@@ -604,7 +632,7 @@ window.__ModuleLoader__.load({
             id: "team-panel",
             order: 15,
             locale: NS,
-            inject: () => ({ t, openPanel: () => setOpen(true) }),
+            inject: () => ({ t, openPanel: (sessionId) => setTarget({ sessionId }) }),
           },
           TeamPanelTrigger,
         ),
@@ -617,7 +645,7 @@ window.__ModuleLoader__.load({
             id: "team-panel",
             order: 300,
             locale: NS,
-            inject: () => ({ t, close: () => setOpen(false), isOpen, actions }),
+            inject: () => ({ t, close: () => setTarget(null), visibility, actions }),
           },
           TeamPanel,
         ),

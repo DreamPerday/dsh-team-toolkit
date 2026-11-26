@@ -174,41 +174,64 @@ const summaries = {
   "s-b": { running: true, blank: false },
 };
 const projections = {
-  "s-lead": { values: { contextPressure: { projectedTokens: 42000, contextWindow: 500000 } } },
+  "s-lead": {
+    values: {
+      subagentCatalog: catalog,
+      agentTeam: { enabled: true, tasks },
+      contextPressure: { projectedTokens: 42000, contextWindow: 500000 },
+    },
+  },
   "s-a": { values: { contextPressure: { projectedTokens: 455000, contextWindow: 500000 } } },
   "s-b": { values: { contextPressure: { pressureTokens: 150000, contextWindow: 200000 } } },
 };
 
+/**
+ * Slot props for the panel. `shell.overlay` is root-scoped, so `sessionId` and
+ * `useProjection` are deliberately NOT provided: the only way to address a
+ * Session is the visibility store the header trigger writes.
+ */
 function propsFor({ open, archivedSessionIds = [] }) {
   return {
     t: (key, params) => (params === undefined ? key : `${key} ${JSON.stringify(params)}`),
     close: () => {},
-    isOpen: () => open,
     actions: {
       open: () => {},
       retire: async () => {},
       restore: async () => {},
-    },
-    sessionId: "s-lead",
-    useProjection: (key) => {
-      if (key === "subagentCatalog") return catalog;
-      if (key === "agentTeam") return { enabled: true, tasks };
-      if (key === "contextPressure") return projections["s-lead"].values.contextPressure;
-      return undefined;
     },
     useSessions: (selector) => selector({ projectionsBySession: projections, byId: summaries }),
     useWorkspaces: (selector) => selector({ archivedSessionIds }),
   };
 }
 
+/** A fresh visibility store shaped like the plugin's, driving the overlay. */
+function visibilityFor(target) {
+  const listeners = new Set();
+  let value = target;
+  return {
+    store: {
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      getSnapshot: () => value,
+    },
+    set(next) {
+      value = next;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
 // --- closed panel renders nothing -----------------------------------------
-const closed = overlay.component({ ...overlay.inject(), ...propsFor({ open: false }) });
+const closedVisibility = visibilityFor(null);
+const closed = overlay.component({ ...overlay.inject(), ...propsFor({ open: false }), visibility: closedVisibility.store });
 check("closed panel renders nothing", closed === null || closed === undefined);
 
 // --- open panel: members, occupancy, graph --------------------------------
 const openProps = propsFor({ open: true, archivedSessionIds: ["s-b"] });
-const injected = overlay.inject();
-const tree = expand(overlay.component({ ...injected, ...openProps }));
+const openVisibility = visibilityFor({ sessionId: "s-lead" });
+const tree = expand(overlay.component({ ...overlay.inject(), ...openProps, visibility: openVisibility.store }));
 check("open panel renders a tree", tree !== null && typeof tree === "object");
 
 const elements = [];
@@ -254,7 +277,7 @@ const glyphs = elements.filter((node) => node.type === "circle" && node.props?.c
 check("blocked tasks are marked", glyphs.some((node) => node.props["data-blocked"] === "true"), glyphs.map((node) => node.props["data-blocked"]).join(","));
 
 // --- trigger counters ------------------------------------------------------
-const triggerTree = expand(trigger.component({ ...trigger.inject(), ...openProps }));
+const triggerTree = expand(trigger.component({ ...trigger.inject(), ...openProps, sessionId: "s-lead" }));
 const triggerTexts = [];
 const triggerEls = [];
 walk(triggerTree, (entry) => {
@@ -265,6 +288,19 @@ check("trigger is a button", triggerEls.some((node) => node.type === "button"));
 const badges = triggerEls.filter((node) => node.props?.className === "tp-badge").map((node) => node.children.join(""));
 check("trigger counts live members", badges.includes("2"), badges.join(","));
 check("trigger counts tasks", badges.includes("3"), badges.join(","));
+
+// --- the root-scoped overlay must render with slot props only -------------
+// `shell.overlay` receives no sessionId and no useProjection; a panel that
+// reached for either would throw and take the whole frame down with it.
+const rootOnly = { ...overlay.inject(), ...propsFor({ open: true }), visibility: visibilityFor({ sessionId: "s-lead" }).store };
+let rootThrew = null;
+try {
+  expand(overlay.component(rootOnly));
+} catch (error) {
+  rootThrew = error;
+}
+check("overlay renders without sessionId or useProjection", rootThrew === null, rootThrew === null ? undefined : String(rootThrew.message));
+check("overlay reads projections through useSessions", !source.includes("useProjection("));
 
 // --- confirmation is inline, never a modal prompt -------------------------
 const source_lower = source.toLowerCase();
@@ -277,9 +313,9 @@ check("panel never writes Session events", !source.includes("session.append") &&
 // --- degraded inputs -------------------------------------------------------
 const emptyTree = expand(
   overlay.component({
-    ...trigger.inject(),
+    ...overlay.inject(),
     ...openProps,
-    useProjection: () => undefined,
+    visibility: visibilityFor({ sessionId: "s-lead" }).store,
     useSessions: (selector) => selector({ projectionsBySession: {}, byId: {} }),
     useWorkspaces: (selector) => selector({ archivedSessionIds: undefined }),
   }),

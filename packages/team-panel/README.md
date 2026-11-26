@@ -46,9 +46,11 @@ refresh the page.
 
 Everything comes from shipped seams:
 
-- `useProjection('subagentCatalog')` — the root Session's direct children, with their names
-- `useProjection('agentTeam')` — the shared task board (`tasks[].blockedBy`, `status`, `ownerName`)
-- `useSessions` — each member's `contextPressure` projection and `running` flag
+- `useSessions` — the Session list snapshot, which carries every Session projection; the panel
+  reads `subagentCatalog` (the root's direct children and their names), `agentTeam` (the shared
+  task board: `tasks[].blockedBy`, `status`, `ownerName`), each member's `contextPressure`,
+  and every member's `running` flag from it. `shell.overlay` is root-scoped and gets neither
+  `sessionId` nor `useProjection`, so this is the only hook that works there.
 - `useWorkspaces` — the registry-global `archivedSessionIds` set
 - `ctx.get('uiWorkspace')` — `archiveSession(id, { stopActivity: true })`, `unarchiveSession(id)`, `openSession(id)`
 
@@ -61,7 +63,7 @@ Session running with it sends a byte-identical model request to one without it.
 node verify.mjs
 ```
 
-38 offline checks against a stubbed browser runtime: slot registration and
+40 offline checks against a stubbed browser runtime: slot registration and
 ordering, dictionary parity, the closed-panel no-op, one row per member, the
 occupied/archived split, occupancy bar levels, the dependency graph's node and
 edge counts, deleted-task exclusion, blocked-task marking, trigger counters,

@@ -42,9 +42,12 @@ Host 重载。
 
 全部走官方接口：
 
-- `useProjection('subagentCatalog')` —— 根会话的直接子级及其名字
-- `useProjection('agentTeam')` —— 共享任务板（`tasks[].blockedBy`、`status`、`ownerName`）
-- `useSessions` —— 每个成员的 `contextPressure` 投影与 `running` 标记
+- `useSessions` —— 会话列表快照，里面带着每个会话的全部投影；面板从它读出
+  `subagentCatalog`（根会话的直接子级及名字）、`agentTeam`（共享任务板的
+  `tasks[].blockedBy`、`status`、`ownerName`）、每个成员的 `contextPressure` 与
+  `running` 标记。`shell.overlay` 是 root 作用域，拿不到 `sessionId` 也拿不到
+  `useProjection`，所以这是那里唯一可用的 hook。
+- `useProjection` 不可用（见上）
 - `useWorkspaces` —— 注册表全局的 `archivedSessionIds` 集合
 - `ctx.get('uiWorkspace')` —— `archiveSession(id, { stopActivity: true })`、`unarchiveSession(id)`、`openSession(id)`
 
@@ -57,7 +60,7 @@ Host 重载。
 node verify.mjs
 ```
 
-38 项离线检查（用桩浏览器运行时）：Slot 注册与排序、中英字典键一致、面板关闭时空渲染、
+40 项离线检查（用桩浏览器运行时）：Slot 注册与排序、中英字典键一致、面板关闭时空渲染、
 成员行数、在役/已移除分组、占用条的颜色分级、依赖图节点与边数、已删除任务排除、阻塞标记、
 入口计数、降级输入，以及"移除必须先确认"的保证。
 
