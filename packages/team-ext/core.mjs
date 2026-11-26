@@ -259,13 +259,13 @@ export function createRecorder(options) {
       return;
     }
 
-    if (type === "team/member" || type === "team/task") {
+    if (type === "team/member" || type === "team/task" || type === "team/mode") {
       const member = data.member;
       const task = data.task;
       emit({
         ...head(),
         k: "team",
-        ty: type === "team/member" ? "member" : "task",
+        ty: type === "team/member" ? "member" : type === "team/mode" ? "mode" : "task",
         name: asText(member?.name ?? task?.ownerName, 80),
         status: asText(member?.phase ?? task?.status, 32),
         id: asText(member?.id ?? task?.id, 64),

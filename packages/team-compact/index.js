@@ -1,22 +1,18 @@
 /**
- * dsh-team-compact — manual context compaction for Agent Teams.
+ * dsh-team-compact — manual context compaction for DSH Agent Teams (0.2.2+).
  *
- * Adds two manual interfaces on top of the shipped compaction seam:
+ * 0.2.2 changed Agent Teams: there is no roster and no `spawn_teammate`. A Team
+ * is the subagent tree of one root Session; teammates are ordinary continuable
+ * subagents addressed by name. This port keeps the two manual interfaces:
  *
- *   - tool `compact_context`   — available to the Lead and to every teammate
- *                                (scoped per team member, so new teammates get it
- *                                automatically). The Lead may target a member name
- *                                or an exact live session id; a teammate may only
- *                                compact itself.
- *   - command `/compact-agent` — human-facing wrapper with the same resolution,
- *                                usable from any session.
+ *   - tool `compact_context`   — Lead and every teammate (scoped per member).
+ *   - command `/compact-agent` — human-facing wrapper.
  *
  * Both only call public services: `toolResultPruner.pruneSession()` (LLM-free)
- * and `compaction.compactNow()` (summary). They never write session events
- * themselves, so every effect is replayable through the shipped plugins.
+ * and `compaction.compactNow()` (summary). Membership and names come from
+ * `subagents.listDescendants()` / `subagents.resolveName()`.
  *
- * Requires an idle target: `compactNow` reserves the agent's next-turn admission
- * and refuses while a turn is open or work is queued.
+ * Requires an idle target: `compactNow` refuses while a turn is open.
  */
 
 /** Cordis plugin name used by Loader diagnostics. */
@@ -49,13 +45,7 @@ function integerOrUndefined(value) {
   return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : undefined;
 }
 
-/**
- * Estimated context tokens for one Agent's session, or undefined when the meter
- * is unavailable. The estimate is the shipped heuristic (chars/4), not the
- * provider's exact count.
- * @param {object} ctx @param {object} agent
- * @returns {number | undefined}
- */
+/** Estimated context tokens for one Agent's session, or undefined when unavailable. */
 function measure(ctx, agent) {
   try {
     const meter = ctx.get?.("tokenMeter");
@@ -66,71 +56,123 @@ function measure(ctx, agent) {
   }
 }
 
-/**
- * The routed model's declared context window, when the LLM service can resolve it.
- * @param {object} ctx @param {object} agent
- * @returns {Promise<number | undefined>}
- */
+/** The routed model's declared context window, when the LLM service can resolve it. */
 async function contextWindow(ctx, agent) {
   try {
     const llm = ctx.get?.("llm");
     const config = agent.session?.requestHeader?.()?.config;
     if (llm === undefined || config?.provider === undefined || config?.model === undefined) return undefined;
     const info = await llm.resolveModelInfo(config.provider, config.model);
-    return integerOrUndefined(info?.context?.contextWindow);
+    return integerOrUndefined(info?.context?.contextWindow ?? info?.contextWindow);
   } catch {
     return undefined;
   }
 }
 
-/** @param {object} target @param {object | undefined} membership */
-function describeTarget(target, membership) {
-  if (membership === undefined) return String(target.id);
-  return membership.role === "lead" ? "lead" : `teammate:${membership.name}`;
+/** Lazy service lookup so a late-published service is still found. */
+function subagentsOf(ctx) {
+  return ctx.get?.("subagents");
+}
+
+function teamsOf(ctx) {
+  return ctx.get?.("agentTeams");
+}
+
+/** Whether one Agent belongs to a Team-enabled root tree. */
+function inTeam(ctx, agent) {
+  const teams = teamsOf(ctx);
+  try {
+    if (typeof teams?.isEnabled === "function") return teams.isEnabled(agent) === true;
+  } catch {}
+  // Team mode unknown (older build or service still loading): allow roots only.
+  try {
+    return subagentsOf(ctx)?.rootOf?.(agent)?.id === agent.id;
+  } catch {
+    return false;
+  }
+}
+
+/** Roster row for the root's descendants, as `{ id, name }`. */
+async function membersOf(ctx, root, signal) {
+  const subagents = subagentsOf(ctx);
+  if (subagents === undefined) return [];
+  try {
+    const rows = await subagents.listDescendants(root.id, signal);
+    return rows
+      .filter((row) => row.kind === "child" && typeof row.name === "string")
+      .map((row) => ({ id: row.id, name: row.name, path: row.path }));
+  } catch {
+    return [];
+  }
+}
+
+/** @param {object} target @param {string} label */
+function describeTarget(target, label) {
+  return label ?? String(target.id);
 }
 
 /**
  * Resolve one compaction target from a tool/command request.
  * @param {object} ctx
- * @param {object | undefined} teams - the optional `agentTeams` service.
- * @param {object} caller - the exact invoking Agent.
+ * @param {object} caller
  * @param {{ target?: string, session?: string }} request
- * @returns {{ agent: object, membership: object | undefined }}
+ * @param {AbortSignal | undefined} signal
  */
-function resolveTarget(ctx, teams, caller, request) {
-  const callerMembership = teams?.tryMembership?.(caller);
-  const isLead = callerMembership?.role === "lead";
+async function resolveTarget(ctx, caller, request, signal) {
+  const subagents = subagentsOf(ctx);
+  let root = caller;
+  try {
+    root = subagents?.rootOf?.(caller) ?? caller;
+  } catch {}
+  const isLead = root.id === caller.id;
+
   if (typeof request.session === "string" && request.session.length > 0) {
     if (!isLead) throw new Error("only the Team Lead may compact an arbitrary session id");
     const agent = ctx.agents.get(request.session);
     if (agent === undefined) throw new Error(`session "${request.session}" is not live`);
-    return { agent, membership: teams?.tryMembership?.(agent) };
+    return { agent, label: request.session, isLead };
   }
+
   const requested = request.target ?? "self";
-  if (requested === "self") return { agent: caller, membership: callerMembership };
-  const row = teams?.listMembers?.(caller)?.find((member) => member.name === requested);
-  if (row === undefined) throw new Error(`no Team member named "${requested}"`);
-  const agent = ctx.agents.get(row.id);
-  if (agent === undefined) throw new Error(`Team member "${requested}" is not live`);
-  return { agent, membership: teams?.tryMembership?.(agent) };
+  if (requested === "self") return { agent: caller, label: isLead ? "lead" : `teammate:${requested}`, isLead };
+  if (requested === "lead") return { agent: root, label: "lead", isLead };
+
+  const members = await membersOf(ctx, root, signal);
+  const known = members.find((member) => member.name === requested || member.path === requested);
+  if (known === undefined) throw new Error(`no Team member named "${requested}"`);
+  const live = ctx.agents.get(known.id);
+  if (live === undefined) {
+    throw new Error(`Team member "${requested}" is not live; send it a message to resume it, then retry`);
+  }
+  return { agent: live, label: `teammate:${known.name}`, isLead };
+}
+
+/** Size accounting that tolerates both pruner result shapes. */
+function prunedSize(result) {
+  const entries = Array.isArray(result?.entries) ? result.entries : Array.isArray(result?.pruned) ? result.pruned : [];
+  let chars = 0;
+  for (const entry of entries) {
+    if (typeof entry?.charsBefore === "number" && typeof entry?.charsAfter === "number") {
+      chars += Math.max(0, entry.charsBefore - entry.charsAfter);
+    }
+  }
+  if (chars === 0 && typeof result?.charsRemoved === "number") chars = result.charsRemoved;
+  return { items: entries.length, chars };
 }
 
 /**
  * Prune then (optionally) summarize one idle Agent's context.
- * @param {object} ctx
- * @param {object | undefined} teams
- * @param {object} caller
- * @param {{ target?: string, session?: string, mode?: string }} request
- * @param {AbortSignal | undefined} signal
  * @returns {Promise<object>} the tool value
  */
-export async function runCompaction(ctx, teams, caller, request, signal) {
+export async function runCompaction(ctx, caller, request, signal) {
   const mode = request.mode ?? "auto";
   if (mode !== "auto" && mode !== "prune" && mode !== "compact") throw new Error(`unknown mode "${mode}"`);
-  const { agent: target, membership } = resolveTarget(ctx, teams, caller, request);
-  const targetLabel = describeTarget(target, membership);
-  if (target.status !== "idle") {
-    throw new Error(`target "${targetLabel}" is ${target.status}; wait until it is inactive or interrupt it first`);
+  const { agent: target, label } = await resolveTarget(ctx, caller, request, signal);
+  const targetLabel = describeTarget(target, label);
+
+  const status = target.status;
+  if (typeof status === "string" && status !== "idle") {
+    throw new Error(`target "${targetLabel}" is ${status}; wait until it is inactive or interrupt it first`);
   }
 
   /** @type {Record<string, unknown>} */
@@ -146,14 +188,15 @@ export async function runCompaction(ctx, teams, caller, request, signal) {
   if (window !== undefined) value.window = window;
 
   if (mode === "auto" || mode === "prune") {
-    const pruner = target.ctx?.get?.("toolResultPruner");
+    const pruner = ctx.get?.("toolResultPruner") ?? target.ctx?.get?.("toolResultPruner");
     if (pruner === undefined) {
-      value.note = "no tool-result pruner mounted in the target scope";
+      value.note = "no tool-result pruner mounted";
     } else {
       try {
         const result = pruner.pruneSession(target.session);
-        value.prunedItems = Array.isArray(result?.pruned) ? result.pruned.length : 0;
-        value.prunedChars = integerOrUndefined(result?.charsRemoved) ?? 0;
+        const size = prunedSize(result);
+        value.prunedItems = size.items;
+        value.prunedChars = size.chars;
       } catch (error) {
         value.note = `prune failed: ${error?.message ?? error}`;
       }
@@ -165,14 +208,15 @@ export async function runCompaction(ctx, teams, caller, request, signal) {
   const shouldSummarize =
     mode === "compact" || (mode === "auto" && (window === undefined || value.after >= window * 0.8));
   if (shouldSummarize) {
-    const compaction = target.ctx?.get?.("compaction");
+    const compaction = ctx.get?.("compaction") ?? target.ctx?.get?.("compaction");
     if (compaction === undefined) {
-      value.note = `${value.note ?? ""} no compaction service mounted in the target scope`.trim();
+      value.note = `${value.note ?? ""} no compaction service mounted`.trim();
     } else {
       try {
         const result = await compaction.compactNow(target, signal);
         if (result !== null && result !== undefined) {
-          value.compactedTokens = integerOrUndefined(result.shadowedTokenCount) ?? 0;
+          value.compactedTokens =
+            integerOrUndefined(result.shadowedTokenCount ?? result.compactedTokens ?? result.tokens) ?? 0;
         }
       } catch (error) {
         value.compactionError = String(error?.code ?? error?.message ?? error);
@@ -190,9 +234,6 @@ export async function runCompaction(ctx, teams, caller, request, signal) {
  * @param {import("@deepseek-ai/cordis").Context} ctx
  */
 export function apply(ctx) {
-  // Resolve lazily: the Team service may publish after this plugin applies.
-  const teamsOf = () => ctx.get?.("agentTeams");
-
   const tool = {
     name: "compact_context",
     description:
@@ -212,7 +253,7 @@ export function apply(ctx) {
       render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
     },
     execute(args, exec) {
-      return runCompaction(ctx, teamsOf(), exec.agent, args ?? {}, exec.signal);
+      return runCompaction(ctx, exec.agent, args ?? {}, exec.signal);
     },
   };
 
@@ -220,7 +261,7 @@ export function apply(ctx) {
   const installed = new Map();
   const maybeInstall = (agent) => {
     if (installed.has(agent)) return;
-    if (teamsOf()?.tryMembership?.(agent) === undefined) return;
+    if (!inTeam(ctx, agent)) return;
     try {
       installed.set(agent, agent.ctx.tools.register(tool));
     } catch (error) {
@@ -253,38 +294,11 @@ export function apply(ctx) {
       const [first, second] = parts;
       const request = looksLikeSessionId(first) ? { session: first, mode: second } : { target: first, mode: second };
       try {
-        const value = await runCompaction(ctx, teamsOf(), invocation.agent, request, invocation.signal);
+        const value = await runCompaction(ctx, invocation.agent, request, invocation.signal);
         const detail = value.compactionError === undefined ? "" : `; compaction failed (${value.compactionError})`;
         return {
           kind: "success",
           text: `${value.target}: ${value.before} → ${value.after} estimated tokens (pruned ${value.prunedItems} results, ${value.prunedChars} chars)${detail}`,
-        };
-      } catch (error) {
-        return { kind: "error", text: String(error?.message ?? error) };
-      }
-    },
-  });
-
-  const REMOVE_USAGE = "Usage: /team-remove <member-name>";
-  ctx.commands.register({
-    definitionId: "dsh-team-compact/team-remove",
-    name: "team-remove",
-    description: "Remove a Team member from the roster and delete its saved session",
-    async handler(invocation) {
-      const parts = String(invocation.rawInput ?? "").trim().split(/\s+/).filter((part) => part.length > 0);
-      if (parts.length !== 1) return { kind: "error", text: REMOVE_USAGE };
-      const teams = teamsOf();
-      if (teams === undefined || typeof teams.removeTeammate !== "function") {
-        return {
-          kind: "error",
-          text: "team member removal requires the team-member-remove patch; restart DSH Desktop after applying it",
-        };
-      }
-      try {
-        const value = await teams.removeTeammate(invocation.agent, parts[0]);
-        return {
-          kind: "success",
-          text: `removed ${parts[0]} (previous status ${value.previousStatus}${value.sessionDeleted === true ? ", session deleted" : ", session kept"})`,
         };
       } catch (error) {
         return { kind: "error", text: String(error?.message ?? error) };

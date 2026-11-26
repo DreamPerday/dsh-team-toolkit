@@ -108,6 +108,14 @@ export function apply(ctx, config = {}) {
       const agent = agents.get(id);
       if (agent !== undefined) {
         const membership = teams?.tryMembership?.(agent);
+    const subagents = typeof ctx.get === "function" ? ctx.get("subagents") : undefined;
+    if (membership === undefined && subagents !== undefined) {
+      try {
+        const root = subagents.rootOf?.(agent);
+        const names = subagents.namesOf?.(agent);
+        role = root !== undefined && root.id === agent.id ? "lead" : names?.name !== undefined ? `teammate:${names.name}` : "teammate";
+      } catch {}
+    }
         role =
           membership === undefined
             ? "sub"
