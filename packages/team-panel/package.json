@@ -1,0 +1,46 @@
+{
+  "name": "dsh-team-panel",
+  "version": "0.1.0",
+  "description": "Rich Agent-Teams panel for the DSH Web GUI: member roster with context-occupancy bars, retire/restore, and a shared-task dependency graph.",
+  "type": "module",
+  "private": true,
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "cordis",
+    "agent-team",
+    "panel"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DreamPerday/dsh-team-toolkit.git",
+    "directory": "packages/team-panel"
+  }
+}

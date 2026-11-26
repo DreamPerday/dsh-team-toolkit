@@ -1,0 +1,8 @@
+# One composition layer for the team panel.
+#
+# The row exists so the Loader owns this package: the browser half is discovered
+# from the row's package (`dsh.client.platform: web` + the `./client` export), so
+# removing the row also removes the panel.
+- insert:
+    - id: team-panel
+      name: 'dsh-team-panel'
