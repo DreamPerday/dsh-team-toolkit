@@ -1,0 +1,41 @@
+{
+  "name": "dsh-team-effort",
+  "version": "0.1.0",
+  "description": "Keep a chosen reasoning effort on delegated children: bridges subagents.startActivation so agent({provider, model}) no longer falls back to the target model's default strength.",
+  "type": "module",
+  "private": true,
+  "main": "index.js",
+  "exports": {
+    ".": {
+      "default": "./index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "README.md",
+    "verify.mjs"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "cordis",
+    "agent-team",
+    "subagent",
+    "reasoning-effort"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DreamPerday/dsh-team-toolkit.git",
+    "directory": "packages/team-effort"
+  }
+}

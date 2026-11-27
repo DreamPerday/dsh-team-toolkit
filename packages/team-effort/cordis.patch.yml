@@ -1,0 +1,14 @@
+# One composition layer for the delegation-effort bridge.
+#
+# The row is the Host half's Loader entry. `effort` is the reasoning effort id to
+# keep on a child that switches route; set it to the strength you actually want
+# (for the ztoken gpt-6.2-sol route that is `xhigh`). Leave `enabled: false` to
+# turn the bridge off without uninstalling the bundle.
+- insert:
+    - id: team-effort
+      name: 'dsh-team-effort'
+      config:
+        enabled: true
+        effort: xhigh
+        fallbackToDefault: true
+        trustWithoutValidation: false
