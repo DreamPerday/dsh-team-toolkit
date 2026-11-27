@@ -1,6 +1,6 @@
 # dsh-team-toolkit
 
-Three small, additive plugins for **DSH Agent Teams** ([DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)).
+Four small, additive plugins for **DSH Agent Teams** ([DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)).
 None of them edits a shipped package. The first adds a tool and a command; the other two add
 no model-visible input at all.
 
@@ -9,6 +9,7 @@ no model-visible input at all.
 | [`packages/team-compact`](packages/team-compact/README.md) | Manual context compaction for the Lead and every teammate: a scoped `compact_context` tool plus the `/compact-agent` command. | Adds one tool + one human command |
 | [`packages/team-ext`](packages/team-ext/README.md) | Observation-only audit: records per-request cache usage and every prompt-prefix rewrite (compaction, prune, series reset) to JSONL, with an analysis script. | Adds no tool and no prompt section |
 | [`packages/team-panel`](packages/team-panel/README.md) | Web GUI panel: member roster with a context-occupancy bar each, retire/restore backed by the Workspace archive, and the shared-task dependency graph. | Adds no tool and no prompt section |
+| [`packages/team-effort`](packages/team-effort/README.md) | Keeps a chosen reasoning effort on a delegation that switches provider/model, which the shipped runtime would otherwise reset to the target model default. | Adds no tool and no prompt section |
 
 Both are Cordis bundles (`dsh.bundle` manifest) and install into a DSH profile without touching
 `resources/app`.
@@ -27,6 +28,7 @@ git clone https://github.com/DreamPerday/dsh-team-toolkit.git
 plugin_manager action=install_bundle target="<clone>\packages\team-compact"
 plugin_manager action=install_bundle target="<clone>\packages\team-ext"
 plugin_manager action=install_bundle target="<clone>\packages\team-panel"
+plugin_manager action=install_bundle target="<clone>\packages\team-effort"
 ```
 
 Both packages are `link`-installed, so the clone must stay where it is. Restart DSH Desktop after
@@ -39,6 +41,7 @@ Remove with:
 plugin_manager action=remove_bundle target="dsh-team-compact"
 plugin_manager action=remove_bundle target="dsh-team-ext"
 plugin_manager action=remove_bundle target="dsh-team-panel"
+plugin_manager action=remove_bundle target="dsh-team-effort"
 ```
 
 ## Why these exist
